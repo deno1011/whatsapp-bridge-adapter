@@ -26,10 +26,36 @@ const {
   fetchLatestBaileysVersion,
   DisconnectReason,
   Browsers,
+  jidNormalizedUser,
 } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const qrcode = require("qrcode-terminal");
 const { Bridge } = require("./lib/bridge");
+
+// Minimal .env loader (no dependency): load KEY=VALUE from ./.env so plain
+// `node index.js` picks up config without needing --env-file. Real env vars
+// already set take precedence.
+(function loadDotenv() {
+  try {
+    const fs = require("fs");
+    const txt = fs.readFileSync(path.join(__dirname, ".env"), "utf8");
+    for (const line of txt.split("\n")) {
+      const m = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/);
+      if (!m) continue;
+      if (process.env[m[1]] !== undefined) continue;
+      let v = m[2];
+      if (
+        (v.startsWith('"') && v.endsWith('"')) ||
+        (v.startsWith("'") && v.endsWith("'"))
+      ) {
+        v = v.slice(1, -1);
+      }
+      process.env[m[1]] = v;
+    }
+  } catch (e) {
+    /* no .env: use defaults / real env */
+  }
+})();
 
 const BRIDGE_DIR =
   process.env.MESSENGER_BRIDGE_DIR ||
@@ -40,8 +66,11 @@ const ALLOWED = (process.env.WA_ALLOWED_JIDS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 const POLL_MS = parseInt(process.env.WA_POLL_MS || "500", 10);
+const DEBUG = !!process.env.WA_DEBUG;
 
 const bridge = new Bridge(BRIDGE_DIR);
+let selfJid = null; // phone-number JID, set on connection.open
+let selfLid = null; // LID-form JID (newer WhatsApp addressing), if any
 
 function extractText(message) {
   if (!message) return null;
@@ -74,7 +103,13 @@ async function start() {
       qrcode.generate(qr, { small: true });
     }
     if (connection === "open") {
-      console.log("[wa] connected.");
+      selfJid = sock.user && sock.user.id ? jidNormalizedUser(sock.user.id) : null;
+      selfLid =
+        sock.user && sock.user.lid ? jidNormalizedUser(sock.user.lid) : null;
+      console.log(
+        "[wa] connected as", selfJid || "(unknown)",
+        selfLid ? `(lid ${selfLid})` : ""
+      );
       if (ALLOWED.length === 0) {
         console.log(
           "[wa] WARNING: WA_ALLOWED_JIDS is empty — no inbound is relayed.\n" +
@@ -101,26 +136,45 @@ async function start() {
     }
   });
 
-  // Inbound: WhatsApp -> bridge inbox
+  // Inbound: WhatsApp -> bridge inbox. Relay is WHITELIST-driven: a message is
+  // relayed iff its chat JID is in WA_ALLOWED_JIDS. That covers incoming
+  // messages AND your own "Note to Self" chat (fromMe). Every text message's
+  // JID is logged so you can discover which to whitelist (incl. the newer
+  // "@lid" addressing). WA_DEBUG=1 additionally logs raw upserts.
   sock.ev.on("messages.upsert", ({ messages, type }) => {
-    if (type !== "notify") return;
+    if (DEBUG) {
+      for (const dm of messages) {
+        console.log(
+          `[wa][debug] upsert type=${type} fromMe=${dm.key && dm.key.fromMe} ` +
+            `jid=${dm.key && dm.key.remoteJid} ` +
+            `msg=${dm.message ? Object.keys(dm.message).join("/") : "none"}`
+        );
+      }
+    }
+    if (type !== "notify" && type !== "append") return;
     for (const m of messages) {
-      if (!m.message || (m.key && m.key.fromMe)) continue;
-      const jid = m.key && m.key.remoteJid;
+      if (!m.message || !m.key) continue;
+      const jid = m.key.remoteJid;
       if (!jid) continue;
+      const fromMe = !!m.key.fromMe;
       const text = extractText(m.message);
       if (!text) continue; // text-only for now
-      if (ALLOWED.length === 0 || !ALLOWED.includes(jid)) {
-        console.log(`[wa] ignored from ${jid} (not whitelisted): ${text.slice(0, 40)}`);
+      if (!ALLOWED.includes(jid)) {
+        console.log(
+          `[wa] (not whitelisted) ${jid}${fromMe ? " self" : ""}: ` +
+            `${text.slice(0, 40)} — add this JID to WA_ALLOWED_JIDS to relay`
+        );
         continue;
       }
       const id = bridge.writeInbound({
         channel: "whatsapp",
         chat: jid,
         text,
-        meta: { pushName: m.pushName || null, waMessageId: m.key.id },
+        meta: { pushName: m.pushName || null, waMessageId: m.key.id, fromMe },
       });
-      console.log(`[wa] <- ${jid}: ${text.slice(0, 60)} (inbox ${id})`);
+      console.log(
+        `[wa] <- ${jid}${fromMe ? " (self)" : ""}: ${text.slice(0, 60)} (inbox ${id})`
+      );
     }
   });
 

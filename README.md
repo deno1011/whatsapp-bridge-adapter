@@ -44,7 +44,7 @@ Edit `.env`:
 ## First run + the safety whitelist
 
 ```bash
-npm start          # or: node index.js
+npm start          # or: node --env-file=.env index.js
 ```
 
 1. A QR code prints. Open WhatsApp ▸ **Linked Devices** ▸ *Link a device* and
