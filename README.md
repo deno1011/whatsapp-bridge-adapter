@@ -86,6 +86,22 @@ received, so routing is automatic. Only text messages are relayed for now.
 Incoming WhatsApp messages land in the `*messenger-bridge*` buffer (default
 handler) until EAR is wired onto `messenger-on-message-functions`.
 
+## Run as a background service (launchd, macOS)
+
+Do the QR login once in a terminal (`node index.js`) so `./auth` exists. Then
+use the template in [`launchd/`](launchd/com.deno1011.whatsapp-bridge.plist):
+
+```bash
+# edit the __NODE_BINARY__ / __ADAPTER_DIR__ placeholders first
+cp launchd/com.deno1011.whatsapp-bridge.plist ~/Library/LaunchAgents/
+launchctl load  ~/Library/LaunchAgents/com.deno1011.whatsapp-bridge.plist
+launchctl start com.deno1011.whatsapp-bridge
+# logs: /tmp/whatsapp-bridge.{out,err}.log ; stop: launchctl unload <plist>
+```
+
+`KeepAlive` restarts it if it crashes; `RunAtLoad` starts it at login. The
+`.env` in the working directory is auto-loaded.
+
 ## Limitations
 
 - Text only (no media/voice yet).

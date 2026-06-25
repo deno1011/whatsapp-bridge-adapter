@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Run the WhatsApp bridge adapter as a background service (launchd).
+     EDIT the three __PLACEHOLDER__ paths, then:
+       cp this file to ~/Library/LaunchAgents/
+       launchctl load ~/Library/LaunchAgents/com.deno1011.whatsapp-bridge.plist
+       launchctl start com.deno1011.whatsapp-bridge
+     Logs go to /tmp/whatsapp-bridge.{out,err}.log. The .env in the working
+     directory is auto-loaded by index.js. First QR login must be done once by
+     running `node index.js` in a terminal before relying on the service. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.deno1011.whatsapp-bridge</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_BINARY__</string>            <!-- e.g. /opt/homebrew/opt/node/bin/node -->
+    <string>__ADAPTER_DIR__/index.js</string>   <!-- e.g. /Users/you/whatsapp-bridge-adapter/index.js -->
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__ADAPTER_DIR__</string>              <!-- so ./.env and ./auth resolve -->
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>                                        <!-- restart if it crashes -->
+
+  <key>StandardOutPath</key>
+  <string>/tmp/whatsapp-bridge.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/whatsapp-bridge.err.log</string>
+</dict>
+</plist>
