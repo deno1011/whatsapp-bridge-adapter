@@ -96,6 +96,9 @@ async function start() {
 
   sock.ev.on("creds.update", saveCreds);
 
+  // Ids of messages we sent, to drop their echo on messages.upsert.
+  const sentIds = new Set();
+
   sock.ev.on("connection.update", (update) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
@@ -154,6 +157,11 @@ async function start() {
     if (type !== "notify" && type !== "append") return;
     for (const m of messages) {
       if (!m.message || !m.key) continue;
+      // Skip the echo of a message we just sent (prevents a self-chat loop).
+      if (m.key.id && sentIds.has(m.key.id)) {
+        sentIds.delete(m.key.id);
+        continue;
+      }
       const jid = m.key.remoteJid;
       if (!jid) continue;
       const fromMe = !!m.key.fromMe;
@@ -178,10 +186,13 @@ async function start() {
     }
   });
 
-  // Outbound: bridge outbox -> WhatsApp
+  // Outbound: bridge outbox -> WhatsApp. Remember the sent message id so the
+  // echo of it (WhatsApp delivers our own message back via messages.upsert,
+  // e.g. in the self-chat) is not relayed back inbound — which would loop.
   bridge.watchOutbox(async (msg) => {
     if (!msg.chat || !msg.text) return;
-    await sock.sendMessage(String(msg.chat), { text: String(msg.text) });
+    const r = await sock.sendMessage(String(msg.chat), { text: String(msg.text) });
+    if (r && r.key && r.key.id) sentIds.add(r.key.id);
     console.log(`[wa] -> ${msg.chat}: ${String(msg.text).slice(0, 60)}`);
   }, POLL_MS);
 
