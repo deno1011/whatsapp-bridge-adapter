@@ -134,7 +134,7 @@ async function start() {
     auth: state,
     logger: pino({ level: "silent" }),
     browser: Browsers.macOS("Desktop"),
-    syncFullHistory: false,
+    syncFullHistory: false, // a heavy initial sync can time out (408 loop)
   });
 
   sock.ev.on("creds.update", saveCreds);
@@ -223,6 +223,9 @@ async function start() {
       const jid = m.key.remoteJid;
       if (!jid) continue;
       const fromMe = !!m.key.fromMe;
+      // Learn a contact name from conversations (WhatsApp won't push the full
+      // address book to a linked device; this captures people you talk to).
+      if (!fromMe && m.pushName) upsertContacts([{ id: jid, notify: m.pushName }]);
       const text = extractText(m.message);
       if (!text) continue; // text-only for now
       if (!ALLOWED.includes(jid)) {
