@@ -1,0 +1,20 @@
+{
+  "name": "whatsapp-bridge-adapter",
+  "version": "0.1.0",
+  "description": "WhatsApp (Baileys) adapter for emacs-messenger-bridge: relays messages between WhatsApp and the file bridge.",
+  "license": "MIT",
+  "author": "Denis Butic <d.e.n.o@gmx.net>",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.0",
+    "pino": "^9.0.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
