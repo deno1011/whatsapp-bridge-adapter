@@ -74,6 +74,8 @@ const EXPORT_CONTACTS = (process.env.WA_EXPORT_CONTACTS || "true") !== "false";
 const bridge = new Bridge(BRIDGE_DIR);
 let selfJid = null; // phone-number JID, set on connection.open
 let selfLid = null; // LID-form JID (newer WhatsApp addressing), if any
+let reconnectAttempts = 0; // for exponential backoff
+let reconnectTimer = null; // ensures only ONE pending reconnect (no overlap)
 
 // --- contacts export -----------------------------------------------------
 const fsmod = require("fs");
@@ -152,6 +154,7 @@ async function start() {
       qrcode.generate(qr, { small: true });
     }
     if (connection === "open") {
+      reconnectAttempts = 0; // healthy connection: reset backoff
       selfJid = sock.user && sock.user.id ? jidNormalizedUser(sock.user.id) : null;
       selfLid =
         sock.user && sock.user.lid ? jidNormalizedUser(sock.user.lid) : null;
@@ -175,13 +178,22 @@ async function start() {
         lastDisconnect.error.output &&
         lastDisconnect.error.output.statusCode;
       const loggedOut = code === DisconnectReason.loggedOut;
+      if (loggedOut) {
+        console.log("[wa] connection closed — logged out. Delete WA_AUTH_DIR and re-scan.");
+        return;
+      }
+      if (reconnectTimer) return; // a reconnect is already pending — no overlap
+      const delay = Math.min(2000 * Math.pow(2, reconnectAttempts), 60000);
+      reconnectAttempts += 1;
       console.log(
-        `[wa] connection closed (code ${code}) ` +
-          (loggedOut
-            ? "— logged out. Delete WA_AUTH_DIR and re-scan."
-            : "— reconnecting…")
+        `[wa] connection closed (code ${code}) — reconnecting in ${Math.round(
+          delay / 1000
+        )}s (attempt ${reconnectAttempts})`
       );
-      if (!loggedOut) start().catch((e) => console.error("[wa] restart:", e));
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        start().catch((e) => console.error("[wa] restart:", e));
+      }, delay);
     }
   });
 
