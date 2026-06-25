@@ -102,6 +102,13 @@ launchctl start com.deno1011.whatsapp-bridge
 `KeepAlive` restarts it if it crashes; `RunAtLoad` starts it at login. The
 `.env` in the working directory is auto-loaded.
 
+## Contacts export
+
+With `WA_EXPORT_CONTACTS=true` (default) the adapter writes the contact list
+(name → JID) to `<bridge>/contacts.json` so the agent can resolve names. It is
+your own data, local only. Outbound to non-self contacts is guardrailed on the
+Emacs side (approval + rate limit) — see the messenger module.
+
 ## Limitations
 
 - Text only (no media/voice yet).

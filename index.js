@@ -67,10 +67,51 @@ const ALLOWED = (process.env.WA_ALLOWED_JIDS || "")
   .filter(Boolean);
 const POLL_MS = parseInt(process.env.WA_POLL_MS || "500", 10);
 const DEBUG = !!process.env.WA_DEBUG;
+// Export the WhatsApp contact list (name -> JID) to <bridge>/contacts.json so
+// the agent can resolve "send to Max" -> Max's JID. Local file, your own data.
+const EXPORT_CONTACTS = (process.env.WA_EXPORT_CONTACTS || "true") !== "false";
 
 const bridge = new Bridge(BRIDGE_DIR);
 let selfJid = null; // phone-number JID, set on connection.open
 let selfLid = null; // LID-form JID (newer WhatsApp addressing), if any
+
+// --- contacts export -----------------------------------------------------
+const fsmod = require("fs");
+const contactsFile = path.join(BRIDGE_DIR, "contacts.json");
+const contacts = new Map(); // jid -> { name, notify }
+let contactsTimer = null;
+
+function upsertContacts(list) {
+  if (!EXPORT_CONTACTS || !Array.isArray(list)) return;
+  let changed = false;
+  for (const c of list) {
+    if (!c || !c.id) continue;
+    const prev = contacts.get(c.id) || {};
+    const next = {
+      name: c.name || c.verifiedName || prev.name || null,
+      notify: c.notify || prev.notify || null,
+    };
+    if (prev.name !== next.name || prev.notify !== next.notify) {
+      contacts.set(c.id, next);
+      changed = true;
+    }
+  }
+  if (changed && !contactsTimer) {
+    contactsTimer = setTimeout(() => {
+      contactsTimer = null;
+      const obj = {};
+      for (const [jid, v] of contacts) obj[jid] = v;
+      try {
+        fsmod.writeFileSync(contactsFile + ".tmp", JSON.stringify(obj));
+        fsmod.renameSync(contactsFile + ".tmp", contactsFile);
+        console.log(`[wa] contacts: ${contacts.size} exported -> contacts.json`);
+      } catch (e) {
+        console.error("[wa] contacts write:", e.message);
+      }
+    }, 1500); // debounce bursts of contact events
+  }
+}
+// -------------------------------------------------------------------------
 
 function extractText(message) {
   if (!message) return null;
@@ -95,6 +136,11 @@ async function start() {
   });
 
   sock.ev.on("creds.update", saveCreds);
+
+  // Contacts → <bridge>/contacts.json (name resolution for the agent).
+  sock.ev.on("contacts.upsert", upsertContacts);
+  sock.ev.on("contacts.update", upsertContacts);
+  sock.ev.on("messaging-history.set", (h) => upsertContacts(h && h.contacts));
 
   // Ids of messages we sent, to drop their echo on messages.upsert.
   const sentIds = new Set();
