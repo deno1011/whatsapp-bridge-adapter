@@ -78,10 +78,15 @@ let reconnectAttempts = 0; // for exponential backoff
 let reconnectTimer = null; // ensures only ONE pending reconnect (no overlap)
 
 // --- contacts export -----------------------------------------------------
-const fsmod = require("fs");
-const contactsFile = path.join(BRIDGE_DIR, "contacts.json");
 const contacts = new Map(); // jid -> { name, notify }
 let contactsTimer = null;
+
+// "<number>@s.whatsapp.net" -> "+<number>" (the E.164 join key the bridge
+// merges on). Returns null for @lid (privacy form, no number) and groups.
+function jidToE164(jid) {
+  const m = /^(\d+)@s\.whatsapp\.net$/.exec(jid || "");
+  return m ? "+" + m[1] : null;
+}
 
 function upsertContacts(list) {
   if (!EXPORT_CONTACTS || !Array.isArray(list)) return;
@@ -101,12 +106,19 @@ function upsertContacts(list) {
   if (changed && !contactsTimer) {
     contactsTimer = setTimeout(() => {
       contactsTimer = null;
-      const obj = {};
-      for (const [jid, v] of contacts) obj[jid] = v;
+      const records = [];
+      for (const [jid, v] of contacts) {
+        records.push({
+          e164: jidToE164(jid),
+          handle: jid,
+          name: v.name || v.notify || null,
+        });
+      }
       try {
-        fsmod.writeFileSync(contactsFile + ".tmp", JSON.stringify(obj));
-        fsmod.renameSync(contactsFile + ".tmp", contactsFile);
-        console.log(`[wa] contacts: ${contacts.size} exported -> contacts.json`);
+        bridge.writeContacts("whatsapp", records);
+        console.log(
+          `[wa] contacts: ${records.length} exported -> contacts/whatsapp.json`
+        );
       } catch (e) {
         console.error("[wa] contacts write:", e.message);
       }
