@@ -261,12 +261,16 @@ async function start() {
   // Outbound: bridge outbox -> WhatsApp. Remember the sent message id so the
   // echo of it (WhatsApp delivers our own message back via messages.upsert,
   // e.g. in the self-chat) is not relayed back inbound — which would loop.
-  bridge.watchOutbox(async (msg) => {
-    if (!msg.chat || !msg.text) return;
-    const r = await sock.sendMessage(String(msg.chat), { text: String(msg.text) });
-    if (r && r.key && r.key.id) sentIds.add(r.key.id);
-    console.log(`[wa] -> ${msg.chat}: ${String(msg.text).slice(0, 60)}`);
-  }, POLL_MS);
+  bridge.watchOutbox(
+    async (msg) => {
+      if (!msg.chat || !msg.text) return;
+      const r = await sock.sendMessage(String(msg.chat), { text: String(msg.text) });
+      if (r && r.key && r.key.id) sentIds.add(r.key.id);
+      console.log(`[wa] -> ${msg.chat}: ${String(msg.text).slice(0, 60)}`);
+    },
+    POLL_MS,
+    "whatsapp" // only deliver whatsapp messages; leave others for their adapter
+  );
 
   console.log(`[wa] bridge dir: ${BRIDGE_DIR}`);
   console.log(`[wa] auth dir:   ${AUTH_DIR}`);
