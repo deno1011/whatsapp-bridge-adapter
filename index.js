@@ -134,7 +134,7 @@ async function start() {
     auth: state,
     logger: pino({ level: "silent" }),
     browser: Browsers.macOS("Desktop"),
-    syncFullHistory: false, // a heavy initial sync can time out (408 loop)
+    syncFullHistory: true, // pull contact list on connect
   });
 
   sock.ev.on("creds.update", saveCreds);
@@ -170,6 +170,17 @@ async function start() {
         );
       } else {
         console.log("[wa] relaying inbound from:", ALLOWED.join(", "));
+      }
+      // Force an app-state resync to pull the contact list (it is normally
+      // only sent at initial link, not on reconnect).
+      if (typeof sock.resyncAppState === "function") {
+        sock
+          .resyncAppState(
+            ["critical_block", "critical_unblock_low", "regular_high", "regular_low", "regular"],
+            false
+          )
+          .then(() => console.log("[wa] app-state resynced (contacts requested)"))
+          .catch((e) => console.error("[wa] resyncAppState:", e.message));
       }
     } else if (connection === "close") {
       const code =
