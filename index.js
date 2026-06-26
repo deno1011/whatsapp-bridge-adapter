@@ -243,15 +243,25 @@ async function start() {
         sentIds.delete(m.key.id);
         continue;
       }
-      const jid = m.key.remoteJid;
-      if (!jid) continue;
+      const rawJid = m.key.remoteJid;
+      if (!rawJid) continue;
+      // WhatsApp privacy: a chat can arrive under an @lid that hides the phone
+      // number. The decoded key carries the real phone-number JID in senderPn,
+      // so normalize to it — everything downstream (whitelist, contacts, name
+      // resolution, the agent) then sees a stable, resolvable identity and
+      // never the @lid. Falls back to the raw jid if no senderPn was sent.
+      const isLid = rawJid.endsWith("@lid");
+      const jid =
+        isLid && m.key.senderPn ? jidNormalizedUser(m.key.senderPn) : rawJid;
       const fromMe = !!m.key.fromMe;
       // Learn a contact name from conversations (WhatsApp won't push the full
       // address book to a linked device; this captures people you talk to).
       if (!fromMe && m.pushName) upsertContacts([{ id: jid, notify: m.pushName }]);
       const text = extractText(m.message);
       if (!text) continue; // text-only for now
-      if (!ALLOWED.includes(jid)) {
+      // Accept the normalized PN jid OR the raw @lid in the whitelist, so old
+      // @lid entries keep working while new ones can use the plain number.
+      if (!ALLOWED.includes(jid) && !ALLOWED.includes(rawJid)) {
         console.log(
           `[wa] (not whitelisted) ${jid}${fromMe ? " self" : ""}: ` +
             `${text.slice(0, 40)} — add this JID to WA_ALLOWED_JIDS to relay`
@@ -262,10 +272,16 @@ async function start() {
         channel: "whatsapp",
         chat: jid,
         text,
-        meta: { pushName: m.pushName || null, waMessageId: m.key.id, fromMe },
+        meta: {
+          pushName: m.pushName || null,
+          waMessageId: m.key.id,
+          fromMe,
+          lid: isLid ? rawJid : null,
+        },
       });
       console.log(
-        `[wa] <- ${jid}${fromMe ? " (self)" : ""}: ${text.slice(0, 60)} (inbox ${id})`
+        `[wa] <- ${jid}${isLid ? ` (was ${rawJid})` : ""}` +
+          `${fromMe ? " (self)" : ""}: ${text.slice(0, 60)} (inbox ${id})`
       );
     }
   });
