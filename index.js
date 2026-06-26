@@ -79,12 +79,14 @@ let reconnectTimer = null; // ensures only ONE pending reconnect (no overlap)
 
 // --- contacts export -----------------------------------------------------
 const contacts = new Map(); // jid -> { name, notify }
+const lidToPn = new Map(); // @lid jid -> phone-number jid (learned mapping)
 let contactsTimer = null;
 
 // "<number>@s.whatsapp.net" -> "+<number>" (the E.164 join key the bridge
-// merges on). Returns null for @lid (privacy form, no number) and groups.
+// merges on). Tolerates a device suffix (number:5@…) and the legacy @c.us
+// host. Returns null for @lid (privacy form, no number) and groups.
 function jidToE164(jid) {
-  const m = /^(\d+)@s\.whatsapp\.net$/.exec(jid || "");
+  const m = /^(\d+)(?::\d+)?@(?:s\.whatsapp\.net|c\.us)$/.exec(jid || "");
   return m ? "+" + m[1] : null;
 }
 
@@ -93,6 +95,10 @@ function upsertContacts(list) {
   let changed = false;
   for (const c of list) {
     if (!c || !c.id) continue;
+    // Learn the @lid <-> phone-number link when the contact carries both forms.
+    if (c.lid && c.id.endsWith("@s.whatsapp.net")) {
+      lidToPn.set(jidNormalizedUser(c.lid), jidNormalizedUser(c.id));
+    }
     const prev = contacts.get(c.id) || {};
     const next = {
       name: c.name || c.verifiedName || prev.name || null,
@@ -108,9 +114,14 @@ function upsertContacts(list) {
       contactsTimer = null;
       const records = [];
       for (const [jid, v] of contacts) {
+        // If this is an @lid entry whose number we learned, export it under the
+        // resolved phone number so it merges (also cross-channel) on the e164
+        // key instead of staying an unmergeable @lid.
+        const pn = jid.endsWith("@lid") ? lidToPn.get(jid) : null;
+        const handle = pn || jid;
         records.push({
-          e164: jidToE164(jid),
-          handle: jid,
+          e164: jidToE164(handle),
+          handle,
           name: v.name || v.notify || null,
         });
       }
@@ -245,6 +256,8 @@ async function start() {
       }
       const rawJid = m.key.remoteJid;
       if (!rawJid) continue;
+      // Personal 1:1 only — ignore groups, broadcast lists and status.
+      if (rawJid.endsWith("@g.us") || rawJid.endsWith("@broadcast")) continue;
       // WhatsApp privacy: a chat can arrive under an @lid that hides the phone
       // number. The decoded key carries the real phone-number JID in senderPn,
       // so normalize to it — everything downstream (whitelist, contacts, name
@@ -253,6 +266,7 @@ async function start() {
       const isLid = rawJid.endsWith("@lid");
       const jid =
         isLid && m.key.senderPn ? jidNormalizedUser(m.key.senderPn) : rawJid;
+      if (isLid && m.key.senderPn) lidToPn.set(rawJid, jid); // learn the link
       const fromMe = !!m.key.fromMe;
       // Learn a contact name from conversations (WhatsApp won't push the full
       // address book to a linked device; this captures people you talk to).
